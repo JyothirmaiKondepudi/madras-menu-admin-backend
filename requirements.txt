@@ -1,0 +1,10 @@
+psycopg2-binary==2.9.13   # used directly now by hierarchy/traverse.py (propose_hierarchy.py's --dry-run path doesn't need it)
+fastapi==0.141.1
+pydantic==2.13.5
+sqlalchemy==2.1.1
+uvicorn==0.54.0
+alembic==1.20.0
+bcrypt==5.0.0   # auth/security.py password hashing — used directly, not via passlib (bcrypt>=4.1 breaks passlib's version-sniffing)
+pyjwt[crypto]==2.15.0   # auth/security.py JWT tokens — chosen over python-jose (simpler API, no algorithm-confusion CVE history)
+reportlab==5.0.1   # services/invoice_pdf.py — pure-Python PDF generation, no system-level deps (unlike weasyprint)
+tzdata==2026.5   # services/timezones.py: IANA timezone data for zoneinfo, independent of the base image
