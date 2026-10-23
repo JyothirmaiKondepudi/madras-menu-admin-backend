@@ -1,2 +1,2 @@
 # madras-menu-admin-backend
-Backend for the amdin portal
+Backend for the admin portal
