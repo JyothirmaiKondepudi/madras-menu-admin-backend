@@ -1,1 +1,12 @@
-.env
+# secrets: every env file except the committed example
+.env*
+!.env.example
+
+# virtual environments
+env/
+.venv/
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
