@@ -1,0 +1,15 @@
+# Kept out of the image. Secrets reach the containers through env_file in
+# docker-compose.yml, so no env file belongs inside the image.
+.env*
+.git
+.gitignore
+.dockerignore
+docker-compose.yml
+README.md
+
+env/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/

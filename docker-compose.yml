@@ -1,0 +1,46 @@
+# Admin service stack: its own database, migrations and API.
+# Service names are prefixed "admin-" so this file can later be pulled into a
+# shared compose file (include:) next to the customer stack without clashing.
+services:
+  admin-postgres:
+    image: postgres:16
+    container_name: madras-admin-postgres
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: madras_admin_local
+    ports:
+      # 5433 is the customer database on the Mac
+      - "5434:5432"
+    volumes:
+      - madras_admin_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Runs migrations once, then exits; the API only starts if this succeeds.
+  admin-migrate:
+    build: .
+    container_name: madras-admin-migrate
+    env_file:
+      - .env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      admin-postgres:
+        condition: service_healthy
+
+  admin-api:
+    build: .
+    container_name: madras-admin-api
+    env_file:
+      - .env
+    ports:
+      # 8000 is the customer API on the Mac
+      - "8001:8000"
+    depends_on:
+      admin-migrate:
+        condition: service_completed_successfully
+
+volumes:
+  madras_admin_pgdata:
