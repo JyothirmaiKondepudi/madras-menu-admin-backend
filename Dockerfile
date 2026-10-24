@@ -7,9 +7,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Run as an unprivileged user. It owns storage/ because the app writes
-# invoice PDFs there; a new named volume mounted on it copies this ownership.
-RUN useradd --create-home app && mkdir -p storage/invoices && chown -R app storage
+# Run as an unprivileged user.
+RUN useradd --create-home app 
 USER app
 
 # Liveness only: "/" doesn't touch the database, so a short database outage
