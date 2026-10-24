@@ -2,7 +2,7 @@
 
 Backend for the **admin portal**: the dashboard our own staff use to manage the catering companies that subscribe to the Madras Catering app.
 
-Status as of 2026-10-24: a running skeleton. The admin API and its own Postgres database start with one `docker compose up`, migrations run through Alembic (an empty baseline), and the health checks pass. **There are no tables yet**: the `customers` table below is a proposal waiting for review.
+Status as of 2026-10-24: the admin API and its own Postgres database start with one `docker compose up`, migrations run through Alembic, and the health checks pass. The first table, `customers`, has a model, a schema and a migration (`55d2f93f7577`); there are no API endpoints for it yet.
 
 ## Vocabulary
 
@@ -47,33 +47,33 @@ The same company is described in both databases, for different jobs:
 | Whose view | the caterer's own business profile | our account record for them |
 | Edited by | the caterer (Profile page) | our admin staff |
 | Read by | the customer app, on every request | the admin portal |
-| Examples | name on invoices, timezone, logo, `org_disabled` | plan, status, billing contact, notes |
+| Examples | name on invoices, timezone, logo, `org_disabled` | plan, status, billing email, `customer_disabled` |
 
 `organizations` stays in the customer DB because everything there hangs off it: projects, users, catalog and invoice documents have foreign keys to `organizations.org_id` (that's how tenants are kept apart), and the app reads it on every request (timezone, invoice headers). Moving it here would turn those foreign keys into unchecked UUIDs and make every customer request depend on the admin service.
 
 The admin DB keeps **no copy** of the customers' operational data (projects, clients, invoices).
 
-## Proposed: the `customers` table (not built, pending review)
+## The `customers` table
+
+One row per subscribing caterer: our account record for them. Model `models/customer.py`, schema `schemas/customer.py`, migration `alembic/versions/55d2f93f7577_add_customers.py`.
 
 ```mermaid
 erDiagram
-    customers |o..o| organizations : "org_id, no FK"
+    customers }o..|| organizations : "customer_org_id, no FK"
     customers {
         uuid customer_id PK
-        uuid org_id UK "nullable"
-        text company_name
-        text contact_name
-        text contact_email
-        text contact_phone "nullable"
-        text billing_email "nullable"
-        text plan
-        text status "trial, active, past_due, suspended, cancelled"
-        timestamptz trial_ends_at "nullable"
-        timestamptz subscribed_at "nullable"
-        timestamptz cancelled_at "nullable"
-        text notes "nullable"
-        timestamptz created_at
-        timestamptz updated_at
+        varchar customer_name
+        varchar customer_email UK
+        varchar billing_email
+        varchar phone_number "nullable, max 10"
+        varchar plan
+        varchar status "trial, active, past_due, cancelled"
+        timestamptz plan_start_date
+        timestamptz plan_end_date "nullable"
+        boolean customer_disabled "default false"
+        uuid customer_org_id "indexed"
+        timestamptz created_at "default now()"
+        timestamptz updated_at "default now()"
     }
     organizations {
         uuid org_id PK
@@ -83,17 +83,30 @@ erDiagram
     }
 ```
 
-- `organizations` is the customer DB's table, shown for context; it doesn't change.
-- `org_id` links the two. It's a plain UUID with **no foreign key**, because a database can't enforce a reference into another database; the code keeps it consistent. It's nullable so a customer can exist before their workspace does, and unique so one customer has at most one org.
+| Column | Meaning |
+|---|---|
+| `customer_name`, `customer_email` | who we deal with; the email is unique |
+| `billing_email` | where our invoices to them go; required |
+| `phone_number` | optional; up to 10 characters |
+| `plan` | free text for now; becomes a reference to a `plans` table when pricing tiers arrive |
+| `status` | **where they are in the subscription** (the money side): `trial`, `active`, `past_due`, `cancelled` |
+| `plan_start_date`, `plan_end_date` | when the current plan runs; no end date means it continues until cancelled |
+| `customer_disabled` | **whether staff have locked them out**, set by hand and independent of `status` (for example `active` but disabled after abuse, or `past_due` but still enabled during a grace period) |
+| `customer_org_id` | their org in the customer DB (`organizations.org_id`); required |
+
+- **The status values are defined once**, as `CustomerStatus` in `models/choices.py`. The schema uses it for validation (a bad value is a 422), and the model turns it into a database `CHECK` constraint (`customer_status_check`), so scripts and manual SQL can't store a bad value either. To add a status: add it to the enum and write a migration that replaces the constraint.
+- **`customer_org_id` has no foreign key**, because a database can't enforce a reference into another database; the code keeps it consistent. `organizations` is shown for context only; it doesn't change.
+- **`customer_disabled` is only recorded here for now.** It won't lock anyone out of the customer app until the internal API exists and the customer service checks `org_disabled` (see the roadmap).
 - Address, logo, EIN and timezone are deliberately left out: the caterer owns those in the customer DB.
 
+Changing a column from here on means a **new** migration; don't edit `55d2f93f7577` once it has been applied anywhere other than your own machine.
+
 **Open questions:**
-1. Should `company_name` stay in sync with `org_name`, or can they differ (legal name vs trading name)?
-2. When staff set `status = suspended`, should that set `org_disabled` in the customer app (an internal API call)?
-3. Does sales create the customer first, or does self sign-up create both rows?
-4. What does "app info" include: plans, a feature catalog, app versions?
-5. Will payments go through a provider such as Stripe (add `stripe_customer_id`)?
-6. Should every existing org get a customer row, including our own platform org?
+1. Should `customer_name` stay in sync with `org_name`, or can they differ (legal name vs trading name)?
+2. Does sales create the customer first, or does self sign-up create both rows?
+3. What does "app info" include: plans, a feature catalog, app versions?
+4. Will payments go through a provider such as Stripe (add `stripe_customer_id`)?
+5. Should every existing org get a customer row, including our own platform org?
 
 **Later:** a `plans` table (pricing tiers), `admin_users` (staff logins; `platform_admin` moves here from the customer service), per-customer feature switches, and an audit log of admin actions.
 
@@ -123,19 +136,29 @@ Settings come from environment variables, validated at startup by `config.py`; t
 
 ## Migrations
 
-Alembic reads the database URL from `DATABASE_URL` (through `config.database_url()`), not from `alembic.ini`. The first revision, `5127845db22c_baseline`, is empty. To add a table later: define the model on `database.Base`, import it in `alembic/env.py`, then
+Alembic reads the database URL from `DATABASE_URL` (through `config.database_url()`), not from `alembic.ini`.
+
+| Revision | What it does |
+|---|---|
+| `5127845db22c` baseline | nothing (gives Alembic a starting point) |
+| `55d2f93f7577` add customers | creates `customers`, its status `CHECK` and the `customer_org_id` index |
+
+To add a table: define the model on `database.Base`, add it to `models/__init__.py` (that's how `alembic/env.py`'s `import models` sees it; without it autogenerate produces an empty migration), then, with the database running, from your Mac:
 
 ```bash
-alembic revision --autogenerate -m "add customers"
+DATABASE_URL=postgresql+psycopg2://postgres:<password>@localhost:5434/madras_admin_local \
+  alembic revision --autogenerate -m "describe the change"
 ```
 
-and review the generated file before committing it.
+Read the generated file before committing it: autogenerate can miss things. `docker compose up -d --build` applies it (the `admin-migrate` service runs `alembic upgrade head`).
 
 ## Roadmap
 
 - [x] Admin service and database running locally (skeleton, Alembic baseline, health checks)
-- [ ] `customers` table, after the fields are reviewed
+- [x] `customers` table: model, schema, status constraint, migration
+- [ ] Customer endpoints in the admin API (list, create, update, disable)
 - [ ] Internal API with an API key on the customer service (first endpoint: list organizations)
+- [ ] Disabling a customer locks them out of the customer app (the internal API sets `org_disabled`; the customer service enforces it, which it doesn't yet)
 - [ ] Admin staff logins (`admin_users`), moving `platform_admin` out of the customer service
 - [ ] Tests (`tests/test_health.py`) and a 503 response when the database is down
 - [ ] Deployment on GCP (Cloud Run and Cloud SQL), not yet planned in detail
