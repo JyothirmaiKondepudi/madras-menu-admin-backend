@@ -7,10 +7,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 
 from config import get_settings
+from routes import customers
 
 app = FastAPI()
 
 settings = get_settings()
+
+app.include_router(customers.router)
 
 
 @app.get("/db/health")

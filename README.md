@@ -2,7 +2,7 @@
 
 Backend for the **admin portal**: the dashboard our own staff use to manage the catering companies that subscribe to the Madras Catering app.
 
-Status as of 2026-10-24: the admin API and its own Postgres database start with one `docker compose up`, migrations run through Alembic, and the health checks pass. The first table, `customers`, has a model, a schema and a migration (`55d2f93f7577`); there are no API endpoints for it yet.
+Status as of 2026-10-31: the admin API and its own Postgres database start with one `docker compose up`, migrations run through Alembic, and the health checks pass. The first table, `customers`, has a model, a schema, a migration (`55d2f93f7577`) and API endpoints (no login yet).
 
 ## Vocabulary
 
@@ -108,6 +108,24 @@ Changing a column from here on means a **new** migration; don't edit `55d2f93f75
 4. Will payments go through a provider such as Stripe (add `stripe_customer_id`)?
 5. Should every existing org get a customer row, including our own platform org?
 
+### Endpoints
+
+`routes/customers.py`. **No login yet:** anyone who can reach port 8001 can call them (fine locally; staff logins come with `admin_users`).
+
+| Method | Path | Does |
+|---|---|---|
+| `GET` | `/api/v1/customers?status=&disabled=&limit=&offset=` | list, newest first (`limit` 1–200, default 50) |
+| `GET` | `/api/v1/customers/{customer_id}` | one customer, 404 if missing |
+| `POST` | `/api/v1/customers` | create (201); `status` defaults to `trial` |
+| `PATCH` | `/api/v1/customers/{customer_id}` | change only the fields sent |
+| `POST` | `/api/v1/customers/{customer_id}/disable`, `/enable` | set `customer_disabled`; calling it twice is harmless |
+
+- Emails are trimmed and lowercased, so `A@x.com` and `a@x.com` count as the same; a taken `customer_email` is a 409 (caught from the `UNIQUE` constraint, so two requests at once can't both get through).
+- `plan_end_date` before `plan_start_date` is a 422, on create and on update.
+- `customer_org_id` is set once at creation and can't be changed; nothing checks that the org exists yet.
+- `customer_disabled` isn't in `PATCH`: disabling gets its own endpoints because it will later also call the customer service to set `org_disabled`.
+- There's no delete: a customer who leaves becomes `cancelled`.
+
 **Later:** a `plans` table (pricing tiers), `admin_users` (staff logins; `platform_admin` moves here from the customer service), per-customer feature switches, and an audit log of admin actions.
 
 ## Running it locally
@@ -156,7 +174,7 @@ Read the generated file before committing it: autogenerate can miss things. `doc
 
 - [x] Admin service and database running locally (skeleton, Alembic baseline, health checks)
 - [x] `customers` table: model, schema, status constraint, migration
-- [ ] Customer endpoints in the admin API (list, create, update, disable)
+- [x] Customer endpoints in the admin API (list, create, update, disable)
 - [ ] Internal API with an API key on the customer service (first endpoint: list organizations)
 - [ ] Disabling a customer locks them out of the customer app (the internal API sets `org_disabled`; the customer service enforces it, which it doesn't yet)
 - [ ] Admin staff logins (`admin_users`), moving `platform_admin` out of the customer service
